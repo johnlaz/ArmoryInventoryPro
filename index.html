@@ -1902,37 +1902,62 @@ function processImportFile(file) {
         const ws = wb.Sheets[wb.SheetNames[0]];
         rows = XLSX.utils.sheet_to_json(ws, {defval:''});
       }
-      let added = 0;
+      let added = 0, updated = 0;
       rows.forEach(row => {
-        const make = row.make || row.Make || row.MAKE || '';
-        const model = row.model || row.Model || row.MODEL || '';
+        const make = String(row.make || row.Make || row.MAKE || '').trim();
+        const model = String(row.model || row.Model || row.MODEL || '').trim();
         if (!make && !model) return;
-        inventory.push({
-          id: uid(),
-          make: String(make),
-          model: String(model),
-          type: String(row.type||row.Type||'').toUpperCase() || 'PISTOL',
-          caliber: String(row.caliber||row.Caliber||''),
-          serial_number: String(row.serial_number||row.Serial||row.serial||''),
-          barrel_length: String(row.barrel_length||row.barrel||''),
-          overall_length: String(row.overall_length||row.length||''),
-          weight: String(row.weight||row.Weight||''),
-          finish: String(row.finish||row.Finish||''),
-          capacity: String(row.capacity||row.Capacity||''),
-          action: String(row.action||row.Action||''),
-          year: String(row.year||row.Year||''),
-          condition: String(row.condition||row.Condition||'GOOD').toUpperCase(),
-          value: String(row.value||row.Value||''),
-          notes: String(row.notes||row.Notes||''),
-          image_url: String(row.image_url||row.image||''),
-          logo_url: String(row.logo_url||row.logo||''),
-          ai_description: String(row.ai_description||row.description||''),
-          added: new Date().toISOString()
-        });
-        added++;
+
+        const sn = String(row.serial_number||row.Serial||row.serial||'').trim();
+
+        // Build the incoming field map — only non-empty values
+        const incoming = {
+          make, model,
+          type:          String(row.type||row.Type||'').toUpperCase() || undefined,
+          caliber:       String(row.caliber||row.Caliber||'') || undefined,
+          serial_number: sn || undefined,
+          barrel_length: String(row.barrel_length||row.barrel||'') || undefined,
+          overall_length:String(row.overall_length||row.length||'') || undefined,
+          weight:        String(row.weight||row.Weight||'') || undefined,
+          finish:        String(row.finish||row.Finish||'') || undefined,
+          capacity:      String(row.capacity||row.Capacity||'') || undefined,
+          action:        String(row.action||row.Action||'') || undefined,
+          year:          String(row.year||row.Year||'') || undefined,
+          condition:     String(row.condition||row.Condition||'').toUpperCase() || undefined,
+          value:         String(row.value||row.Value||'') || undefined,
+          notes:         String(row.notes||row.Notes||'') || undefined,
+          image_url:     String(row.image_url||row.image||'') || undefined,
+          logo_url:      String(row.logo_url||row.logo||'') || undefined,
+        };
+        // Strip undefined keys
+        Object.keys(incoming).forEach(k => incoming[k] === undefined && delete incoming[k]);
+
+        // Match by serial number if present and non-empty
+        const existing = sn ? inventory.find(g => g.serial_number && g.serial_number.trim().toLowerCase() === sn.toLowerCase()) : null;
+
+        if (existing) {
+          // Update only fields that differ and are non-empty in the import
+          Object.keys(incoming).forEach(k => {
+            if (incoming[k] !== undefined && incoming[k] !== '' && incoming[k] !== existing[k]) {
+              existing[k] = incoming[k];
+            }
+          });
+          updated++;
+        } else {
+          inventory.push({
+            id: uid(),
+            type: 'PISTOL', condition: 'GOOD', // defaults
+            ...incoming,
+            added: new Date().toISOString()
+          });
+          added++;
+        }
       });
       save(); renderInventory();
-      showToast(`✓ Imported ${added} firearm${added!==1?'s':''}`, 'success');
+      const parts = [];
+      if (added)   parts.push(`${added} added`);
+      if (updated) parts.push(`${updated} updated`);
+      showToast(`✓ Import complete: ${parts.join(', ')}`, 'success');
     } catch(err) {
       showToast('Import failed: ' + err.message, 'error');
     }
