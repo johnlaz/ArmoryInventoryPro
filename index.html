@@ -532,6 +532,42 @@ select.filter-select {
 /* screen toggle */
 .screen { display:none; }
 .screen.active { display:block; }
+
+/* ── LOGO PICKER MODAL ── */
+#logoPickerModal .modal { max-width: 680px; }
+.logo-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 10px;
+  max-height: 420px;
+  overflow-y: auto;
+  padding: 4px 2px;
+}
+.logo-picker-tile {
+  background: var(--bg-panel);
+  border: 2px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 14px 8px 10px;
+  display: flex; flex-direction: column;
+  align-items: center; gap: 8px;
+  transition: all .15s;
+}
+.logo-picker-tile:hover { border-color: var(--accent); background: var(--bg-hover); }
+.logo-picker-tile.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.logo-picker-tile img {
+  width: 90px; height: 48px;
+  object-fit: contain; opacity: .85;
+  filter: grayscale(20%);
+}
+.logo-picker-tile .logo-tile-name {
+  font-family: var(--mono); font-size: 9px;
+  letter-spacing: 1.5px; color: var(--text-dim);
+  text-align: center; text-transform: uppercase;
+}
+.logo-picker-tile.img-error img { display:none; }
+.logo-picker-tile.img-error::before { content:'🔫'; font-size:28px; opacity:.3; }
+
 </style>
 </head>
 <body>
@@ -902,8 +938,8 @@ const LOGO_MAP = {
   'sig sauer':          'https://upload.wikimedia.org/wikipedia/commons/thumb/4/46/Sig_Sauer_Logo.svg/400px-Sig_Sauer_Logo.svg.png',
   'sig':                'https://upload.wikimedia.org/wikipedia/commons/thumb/4/46/Sig_Sauer_Logo.svg/400px-Sig_Sauer_Logo.svg.png',
   'ruger':              'https://upload.wikimedia.org/wikipedia/commons/thumb/5/5d/Sturm%2C_Ruger_%26_Co._logo.svg/400px-Sturm%2C_Ruger_%26_Co._logo.svg.png',
-  'springfield armory': 'https://upload.wikimedia.org/wikipedia/commons/thumb/a/ac/Springfield_Armory_logo.svg/400px-Springfield_Armory_logo.svg.png',
-  'springfield':        'https://upload.wikimedia.org/wikipedia/commons/thumb/a/ac/Springfield_Armory_logo.svg/400px-Springfield_Armory_logo.svg.png',
+  'springfield armory': 'https://upload.wikimedia.org/wikipedia/en/thumb/a/ac/Springfield_Armory_%28manufacturer%29_logo.svg/400px-Springfield_Armory_%28manufacturer%29_logo.svg.png',
+  'springfield':        'https://upload.wikimedia.org/wikipedia/en/thumb/a/ac/Springfield_Armory_%28manufacturer%29_logo.svg/400px-Springfield_Armory_%28manufacturer%29_logo.svg.png',
   'colt':               'https://upload.wikimedia.org/wikipedia/commons/thumb/8/82/Colt%27s_Manufacturing_Company_logo.svg/400px-Colt%27s_Manufacturing_Company_logo.svg.png',
   'beretta':            'https://upload.wikimedia.org/wikipedia/commons/thumb/7/7b/Fabbrica_d%27Armi_Pietro_Beretta_logo.svg/400px-Fabbrica_d%27Armi_Pietro_Beretta_logo.svg.png',
   'heckler & koch':     'https://upload.wikimedia.org/wikipedia/commons/thumb/5/54/Heckler_%26_Koch_logo.svg/400px-Heckler_%26_Koch_logo.svg.png',
@@ -939,11 +975,20 @@ const _logoCache = {};
 function getLogoUrl(make) {
   if (!make) return null;
   const key = make.toLowerCase().trim();
-  // exact match first
+  // exact match
   if (LOGO_MAP[key]) return LOGO_MAP[key];
-  // partial match
+  // starts-with match (e.g. "springfield" matches "springfield armory")
+  for (const [brand, url] of Object.entries(LOGO_MAP)) {
+    if (key.startsWith(brand) || brand.startsWith(key)) return url;
+  }
+  // contains match
   for (const [brand, url] of Object.entries(LOGO_MAP)) {
     if (key.includes(brand) || brand.includes(key)) return url;
+  }
+  // word-overlap match (any word in brand appears in key)
+  for (const [brand, url] of Object.entries(LOGO_MAP)) {
+    const brandWords = brand.split(/\s+/).filter(w => w.length > 3);
+    if (brandWords.some(w => key.includes(w))) return url;
   }
   return null;
 }
@@ -1104,10 +1149,13 @@ function showDetail(id) {
             ? `<img src="${g.image_url}" onerror="this.parentElement.innerHTML='<div class=detail-img-placeholder>🔫</div>'">`
             : detailHeroImage(g)
           }
-          <label class="detail-img-upload-btn" title="Upload or replace photo">
-            📷 ${g.image_url ? 'REPLACE PHOTO' : 'ADD PHOTO'}
-            <input type="file" accept="image/*" style="display:none" onchange="handleDetailImageUpload(event,'${g.id}')">
-          </label>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center">
+            <label class="detail-img-upload-btn" title="Upload or replace photo" style="flex:1;text-align:center;justify-content:center">
+              📷 ${g.image_url ? 'REPLACE PHOTO' : 'ADD PHOTO'}
+              <input type="file" accept="image/*" style="display:none" onchange="handleDetailImageUpload(event,'${g.id}')">
+            </label>
+            <button class="detail-img-upload-btn" style="flex:1;cursor:pointer" onclick="openLogoPicker('${g.id}')" title="Pick from manufacturer logos">🏷 USE LOGO</button>
+          </div>
         </div>
         <br>
         <div class="section-title">AI DESCRIPTION</div>
@@ -1963,6 +2011,81 @@ function init() {
 }
 
 init();
+
+// ══════════════════════════════════════════
+//  LOGO PICKER
+// ══════════════════════════════════════════
+let _logoPickerTarget = null; // firearm id
+let _logoPickerSelected = null; // { brand, url }
+
+function openLogoPicker(firestarmId) {
+  _logoPickerTarget = firestarmId;
+  _logoPickerSelected = null;
+  document.getElementById('logoPickerApplyBtn').disabled = true;
+
+  const grid = document.getElementById('logoPickerGrid');
+  // Deduplicate logos (skip alias entries that share the same URL)
+  const seen = new Set();
+  const brands = [];
+  for (const [brand, url] of Object.entries(LOGO_MAP)) {
+    if (!seen.has(url)) {
+      seen.add(url);
+      // Pick a clean display name: prefer the longer alias with spaces
+      const existing = brands.find(b => b.url === url);
+      if (!existing) brands.push({ brand, url });
+    }
+  }
+  brands.sort((a,b) => a.brand.localeCompare(b.brand));
+
+  grid.innerHTML = brands.map(({brand, url}) => `
+    <div class="logo-picker-tile" id="ltile-${CSS.escape(brand)}" onclick="selectLogoTile('${brand}','${url}',this)">
+      <img src="${url}" alt="${brand}" onerror="this.closest('.logo-picker-tile').classList.add('img-error')">
+      <div class="logo-tile-name">${brand}</div>
+    </div>`).join('');
+
+  openModal('logoPickerModal');
+}
+
+function selectLogoTile(brand, url, el) {
+  document.querySelectorAll('.logo-picker-tile').forEach(t => t.classList.remove('selected'));
+  el.classList.add('selected');
+  _logoPickerSelected = { brand, url };
+  document.getElementById('logoPickerApplyBtn').disabled = false;
+}
+
+function applySelectedLogo() {
+  if (!_logoPickerSelected || !_logoPickerTarget) return;
+  const g = inventory.find(x => x.id === _logoPickerTarget);
+  if (!g) return;
+
+  g.image_url = _logoPickerSelected.url;
+  save();
+  closeModal('logoPickerModal');
+  showDetail(_logoPickerTarget); // re-render detail view
+  showToast('✓ Logo applied as photo', 'success');
+}
+
 </script>
+
+<!-- ── LOGO PICKER MODAL ── -->
+<div class="modal-overlay" id="logoPickerModal">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">SELECT MANUFACTURER LOGO</span>
+      <button class="modal-close" onclick="closeModal('logoPickerModal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-family:var(--mono);font-size:11px;color:var(--text-dim);margin-bottom:14px">
+        Choose a logo to use as the photo for this firearm. You can still upload a real photo later to replace it.
+      </p>
+      <div class="logo-picker-grid" id="logoPickerGrid"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal('logoPickerModal')">CANCEL</button>
+      <button class="btn btn-primary" id="logoPickerApplyBtn" onclick="applySelectedLogo()" disabled>USE SELECTED LOGO</button>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
