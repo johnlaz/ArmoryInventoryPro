@@ -1939,19 +1939,31 @@ function parseCSV(text) {
 
 function exportInventory() {
   if (!inventory.length) { showToast('No firearms to export', 'error'); return; }
+  // XLSX cells have a ~32767 char limit; base64 images far exceed that.
+  // We keep images/descriptions in CSV export only, and flag them in xlsx.
+  const cap = v => {
+    if (!v) return '';
+    const s = v.toString();
+    if (s.startsWith('data:')) return '[IMAGE - use CSV export to preserve]';
+    return s.length > 32767 ? s.substring(0, 32767) : s;
+  };
   const data = inventory.map(g => ({
     make:g.make, model:g.model, type:g.type, caliber:g.caliber,
     serial_number:g.serial_number, barrel_length:g.barrel_length,
     overall_length:g.overall_length, weight:g.weight, finish:g.finish,
     capacity:g.capacity, action:g.action, year:g.year,
     condition:g.condition, value:g.value, notes:g.notes,
-    image_url:g.image_url, logo_url:g.logo_url||'', ai_description:g.ai_description||''
+    image_url:cap(g.image_url), logo_url:cap(g.logo_url), ai_description:cap(g.ai_description)
   }));
-  const ws = XLSX.utils.json_to_sheet(data);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Inventory');
-  XLSX.writeFile(wb, 'armory_inventory.xlsx');
-  showToast('Inventory exported', 'success');
+  try {
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Inventory');
+    XLSX.writeFile(wb, 'armory_inventory.xlsx');
+    showToast('Inventory exported', 'success');
+  } catch(e) {
+    showToast('Export failed: ' + e.message, 'error');
+  }
 }
 
 function exportInventoryCSV() {
