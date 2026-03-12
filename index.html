@@ -879,6 +879,10 @@ function getApiKey() {
   return key;
 }
 
+function getTextModel() {
+  return localStorage.getItem('armory_text_model') || 'llama-3.3-70b-versatile';
+}
+
 async function grokText(prompt) {
   const key = getApiKey();
   if (!key) throw new Error('No API key set. Click ⚙ Settings to add your Groq key.');
