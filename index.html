@@ -959,7 +959,7 @@ async function grokVision(prompt, base64Image, mimeType='image/jpeg') {
   throw new Error(lastError || 'No vision model available. Daily quota resets at midnight UTC.');
 }
 
-const TEMPLATE_COLS = ['make','model','type','caliber','serial_number','barrel_length','overall_length','weight','finish','capacity','action','year','condition','value','notes','image_url','logo_url','ai_description'];
+const TEMPLATE_COLS = ['make','model','type','caliber','serial_number','barrel_length','overall_length','weight','finish','capacity','action','year','condition','value','notes','image_url','logo_url'];
 
 // ── MANUFACTURER LOGO MAP ──
 const LOGO_MAP = {
@@ -1192,7 +1192,7 @@ function showDetail(id) {
         <br>
         <div class="section-title" style="display:flex;align-items:center;justify-content:space-between">
           <span>AI DESCRIPTION</span>
-          <button onclick="refreshAIDescription('${g.id}')" title="Fetch fresh AI description" style="background:none;border:1px solid var(--border);color:var(--text-dim);font-family:var(--mono);font-size:9px;letter-spacing:1px;padding:3px 8px;border-radius:2px;cursor:pointer">↺ REFRESH</button>
+          <button id="aiDescRefreshBtn" onclick="refreshAIDescription('${g.id}')" title="Force re-fetch AI description" style="background:none;border:1px solid var(--border);color:var(--text-dim);font-family:var(--mono);font-size:9px;letter-spacing:1px;padding:3px 8px;border-radius:2px;cursor:pointer;${g.ai_description ? 'display:none' : ''}">↺ REFRESH</button>
         </div>
         <div class="detail-description" id="aiDesc">
           ${g.ai_description
@@ -1255,6 +1255,11 @@ function spec(label, value, mono=false) {
 async function fetchAIDescription(g) {
   const el = document.getElementById('aiDesc');
   if (!el) return;
+  // If already cached, just render it — never fetch again unless user explicitly refreshes
+  if (g.ai_description) {
+    el.innerHTML = g.ai_description.split('\n\n').map(p => p ? `<p style="margin-bottom:12px">${p}</p>` : '').join('');
+    return;
+  }
   if (!getApiKey()) {
     el.innerHTML = `<em style="color:var(--accent)">⚙ Add your Groq API key in Settings to enable AI descriptions.</em>`;
     return;
@@ -1262,12 +1267,20 @@ async function fetchAIDescription(g) {
   try {
     const prompt = `You are a firearms expert database. For the firearm: ${g.make} ${g.model} ${g.caliber ? '('+g.caliber+')' : ''} ${g.year||''}, provide a concise but detailed spec sheet description covering: history/background, key features, typical use cases (duty, sport, defense, hunting), reliability reputation, and any notable variants. Also if a serial number is provided (${g.serial_number||'N/A'}), note what information can be inferred. Keep it to 3-4 paragraphs. Write in an authoritative, technical tone suitable for a firearms inventory system.`;
     const text = await grokText(prompt);
-    el.innerHTML = text.split('\n\n').map(p => p ? `<p style="margin-bottom:12px">${p}</p>` : '').join('');
-    // Cache on the firearm object and persist
+    // Save and lock in — once set, never auto-fetch again
     g.ai_description = text;
     save();
+    el.innerHTML = text.split('\n\n').map(p => p ? `<p style="margin-bottom:12px">${p}</p>` : '').join('');
+    // Hide the refresh button now that we have a locked description
+    const refreshBtn = document.getElementById('aiDescRefreshBtn');
+    if (refreshBtn) refreshBtn.style.display = 'none';
   } catch(e) {
-    el.innerHTML = `<em style="color:var(--text-dim)">AI lookup failed: ${e.message}</em>`;
+    // On failure: show error + retry — never blank out any existing content
+    el.innerHTML = `<div style="color:var(--text-dim);font-family:var(--mono);font-size:11px;padding:8px;border:1px solid var(--border);border-radius:4px">
+      <div style="color:var(--red);margin-bottom:6px">⚠ Could not load description</div>
+      <div style="margin-bottom:8px;line-height:1.5">${e.message}</div>
+      <button onclick="fetchAIDescription(inventory.find(x=>x.id==='${g.id}'))" style="background:var(--bg-panel);border:1px solid var(--border);color:var(--accent);font-family:var(--mono);font-size:10px;letter-spacing:1px;padding:4px 10px;cursor:pointer;border-radius:2px">↺ RETRY</button>
+    </div>`;
   }
 }
 
@@ -1979,7 +1992,7 @@ function exportInventory() {
     overall_length:g.overall_length, weight:g.weight, finish:g.finish,
     capacity:g.capacity, action:g.action, year:g.year,
     condition:g.condition, value:g.value, notes:g.notes,
-    image_url:cap(g.image_url), logo_url:cap(g.logo_url), ai_description:cap(g.ai_description)
+    image_url:cap(g.image_url), logo_url:cap(g.logo_url)
   }));
   try {
     const ws = XLSX.utils.json_to_sheet(data);
