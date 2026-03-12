@@ -931,7 +931,7 @@ async function grokVision(prompt, base64Image, mimeType='image/jpeg') {
   throw new Error(`No vision model available. Last error: ${lastError}`);
 }
 
-const TEMPLATE_COLS = ['make','model','type','caliber','serial_number','barrel_length','overall_length','weight','finish','capacity','action','year','condition','value','notes'];
+const TEMPLATE_COLS = ['make','model','type','caliber','serial_number','barrel_length','overall_length','weight','finish','capacity','action','year','condition','value','notes','image_url','logo_url','ai_description'];
 
 // ── MANUFACTURER LOGO MAP ──
 const LOGO_MAP = {
@@ -1162,9 +1162,15 @@ function showDetail(id) {
         </div>
         </div>
         <br>
-        <div class="section-title">AI DESCRIPTION</div>
+        <div class="section-title" style="display:flex;align-items:center;justify-content:space-between">
+          <span>AI DESCRIPTION</span>
+          <button onclick="refreshAIDescription('${g.id}')" title="Fetch fresh AI description" style="background:none;border:1px solid var(--border);color:var(--text-dim);font-family:var(--mono);font-size:9px;letter-spacing:1px;padding:3px 8px;border-radius:2px;cursor:pointer">↺ REFRESH</button>
+        </div>
         <div class="detail-description" id="aiDesc">
-          <div class="ai-loading"><div class="ai-dot"></div><div class="ai-dot"></div><div class="ai-dot"></div> <span>Fetching firearm data...</span></div>
+          ${g.ai_description
+            ? g.ai_description.split('\n\n').map(p => p ? `<p style="margin-bottom:12px">${p}</p>` : '').join('')
+            : '<div class="ai-loading"><div class="ai-dot"></div><div class="ai-dot"></div><div class="ai-dot"></div> <span>Fetching firearm data...</span></div>'
+          }
         </div>
       </div>
       <div class="detail-info-panel">
@@ -1204,7 +1210,7 @@ function showDetail(id) {
   const detailTab = document.getElementById('detailTab');
   detailTab.style.display = 'block';
   switchScreen('detail-screen', detailTab);
-  fetchAIDescription(g);
+  if (!g.ai_description) fetchAIDescription(g);
 }
 
 function spec(label, value, mono=false) {
@@ -1229,9 +1235,23 @@ async function fetchAIDescription(g) {
     const prompt = `You are a firearms expert database. For the firearm: ${g.make} ${g.model} ${g.caliber ? '('+g.caliber+')' : ''} ${g.year||''}, provide a concise but detailed spec sheet description covering: history/background, key features, typical use cases (duty, sport, defense, hunting), reliability reputation, and any notable variants. Also if a serial number is provided (${g.serial_number||'N/A'}), note what information can be inferred. Keep it to 3-4 paragraphs. Write in an authoritative, technical tone suitable for a firearms inventory system.`;
     const text = await grokText(prompt);
     el.innerHTML = text.split('\n\n').map(p => p ? `<p style="margin-bottom:12px">${p}</p>` : '').join('');
+    // Cache on the firearm object and persist
+    g.ai_description = text;
+    save();
   } catch(e) {
     el.innerHTML = `<em style="color:var(--text-dim)">AI lookup failed: ${e.message}</em>`;
   }
+}
+
+async function refreshAIDescription(id) {
+  const g = inventory.find(x => x.id === id);
+  if (!g) return;
+  const el = document.getElementById('aiDesc');
+  if (!el) return;
+  // Clear cache and re-fetch
+  g.ai_description = null;
+  el.innerHTML = '<div class="ai-loading"><div class="ai-dot"></div><div class="ai-dot"></div><div class="ai-dot"></div> <span>Refreshing description...</span></div>';
+  await fetchAIDescription(g);
 }
 
 // ── IMAGE UPLOAD HANDLERS ──
@@ -1860,6 +1880,8 @@ function processImportFile(file) {
           value: String(row.value||row.Value||''),
           notes: String(row.notes||row.Notes||''),
           image_url: String(row.image_url||row.image||''),
+          logo_url: String(row.logo_url||row.logo||''),
+          ai_description: String(row.ai_description||row.description||''),
           added: new Date().toISOString()
         });
         added++;
@@ -1874,13 +1896,43 @@ function processImportFile(file) {
 }
 
 function parseCSV(text) {
-  const lines = text.split('\n').filter(Boolean);
-  if (!lines.length) return [];
-  const headers = lines[0].split(',').map(h=>h.trim().toLowerCase().replace(/\s+/g,'_'));
-  return lines.slice(1).map(line => {
-    const vals = line.split(',');
+  // RFC-4180 compliant parser — handles quoted fields with commas and newlines
+  function parseRow(row) {
+    const result = [];
+    let cur = '', inQuote = false, i = 0;
+    while (i < row.length) {
+      const ch = row[i];
+      if (inQuote) {
+        if (ch === '"' && row[i+1] === '"') { cur += '"'; i += 2; }
+        else if (ch === '"') { inQuote = false; i++; }
+        else { cur += ch; i++; }
+      } else {
+        if (ch === '"') { inQuote = true; i++; }
+        else if (ch === ',') { result.push(cur); cur = ''; i++; }
+        else { cur += ch; i++; }
+      }
+    }
+    result.push(cur);
+    return result;
+  }
+  // Join lines that are inside quoted fields (multi-line values)
+  const allLines = text.replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('\n');
+  const rows = [];
+  let buf = '';
+  let openQuotes = 0;
+  for (const line of allLines) {
+    if (!buf && !line.trim()) continue;
+    buf += (buf ? '\n' : '') + line;
+    openQuotes += (line.match(/"/g)||[]).length;
+    if (openQuotes % 2 === 0) { rows.push(buf); buf = ''; openQuotes = 0; }
+  }
+  if (buf) rows.push(buf);
+  if (!rows.length) return [];
+  const headers = parseRow(rows[0]).map(h => h.trim().toLowerCase().replace(/\s+/g,'_'));
+  return rows.slice(1).filter(Boolean).map(line => {
+    const vals = parseRow(line);
     const obj = {};
-    headers.forEach((h,i) => obj[h] = (vals[i]||'').trim());
+    headers.forEach((h, i) => obj[h] = (vals[i]||'').trim());
     return obj;
   });
 }
@@ -1892,7 +1944,8 @@ function exportInventory() {
     serial_number:g.serial_number, barrel_length:g.barrel_length,
     overall_length:g.overall_length, weight:g.weight, finish:g.finish,
     capacity:g.capacity, action:g.action, year:g.year,
-    condition:g.condition, value:g.value, notes:g.notes, image_url:g.image_url
+    condition:g.condition, value:g.value, notes:g.notes,
+    image_url:g.image_url, logo_url:g.logo_url||'', ai_description:g.ai_description||''
   }));
   const ws = XLSX.utils.json_to_sheet(data);
   const wb = XLSX.utils.book_new();
