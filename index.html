@@ -1396,12 +1396,14 @@ async function aiUpdateFromDetail(id) {
     }
 
     save();
-    statusText.textContent = '✓ Specs updated!';
+    renderInventory();
+    updateCaliberFilter();
+    statusText.textContent = '✓ Specs saved!';
     setTimeout(() => {
       statusEl.style.display = 'none';
       showDetail(id); // re-render the detail view with new data
     }, 800);
-    showToast('✓ Specs updated from AI', 'success');
+    showToast('✓ Specs updated and saved', 'success');
   } catch(e) {
     statusEl.style.display = 'none';
     showToast('AI update failed: ' + e.message, 'error');
