@@ -371,6 +371,8 @@ select.filter-select {
   width:fit-content;
 }
 .detail-back:hover { color: var(--accent); }
+#detailPrevBtn:hover, #detailNextBtn:hover { border-color:var(--accent); color:var(--accent); }
+#detailPrevBtn:disabled, #detailNextBtn:disabled { opacity:.3; cursor:default; }
 .detail-hero {
   display:grid; grid-template-columns: 1fr 380px; gap:24px;
   margin-bottom:24px;
@@ -658,7 +660,21 @@ select.filter-select {
 
   <!-- ── DETAIL SCREEN ── -->
   <div class="screen" id="screen-detail-screen">
-    <div class="detail-back" onclick="switchScreen('inventory', document.querySelector('[data-screen=inventory]'))">← BACK TO INVENTORY</div>
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; gap:12px">
+      <div class="detail-back" onclick="switchScreen('inventory', document.querySelector('[data-screen=inventory]'))">← BACK TO INVENTORY</div>
+      <div style="display:flex; align-items:center; gap:8px">
+        <button id="detailPrevBtn" onclick="navigateDetail(-1)" title="Previous firearm"
+          style="background:var(--bg-card);border:1px solid var(--border);color:var(--text-secondary);
+                 font-family:var(--mono);font-size:14px;padding:5px 14px;cursor:pointer;border-radius:3px;
+                 line-height:1;transition:all .15s">◀</button>
+        <div id="detailNavLabel" style="font-family:var(--mono);font-size:11px;color:var(--text-dim);
+             letter-spacing:1px;min-width:60px;text-align:center"></div>
+        <button id="detailNextBtn" onclick="navigateDetail(1)" title="Next firearm"
+          style="background:var(--bg-card);border:1px solid var(--border);color:var(--text-secondary);
+                 font-family:var(--mono);font-size:14px;padding:5px 14px;cursor:pointer;border-radius:3px;
+                 line-height:1;transition:all .15s">▶</button>
+      </div>
+    </div>
     <div id="detailContent"></div>
   </div>
 
@@ -1228,7 +1244,7 @@ function renderInventory() {
 
   if (currentView === 'list') {
     grid.innerHTML = items.map(g => `
-      <div class="gun-card" onclick="showDetail('${g.id}')">
+      <div class="gun-card" data-id="${g.id}" onclick="showDetail('${g.id}')">
         <div class="gun-card-img">
           ${cardImageHTML(g)}
           <span class="type-badge">${g.type||'FIREARM'}</span>
@@ -1252,7 +1268,7 @@ function renderInventory() {
   } else {
     // Grid (normal + small — same card markup, CSS handles size)
     grid.innerHTML = items.map(g => `
-      <div class="gun-card" onclick="showDetail('${g.id}')">
+      <div class="gun-card" data-id="${g.id}" onclick="showDetail('${g.id}')">
         <div class="gun-card-img">
           ${cardImageHTML(g)}
           <span class="type-badge">${g.type||'FIREARM'}</span>
@@ -1286,6 +1302,37 @@ function updateCaliberFilter() {
 // ══════════════════════════════════════════
 //  DETAIL VIEW
 // ══════════════════════════════════════════
+let currentDetailId = null;
+
+function getFilteredIds() {
+  // Return the ids in the same order currently shown in the inventory grid
+  const cards = document.querySelectorAll('#inventoryGrid [data-id]');
+  if (cards.length) return Array.from(cards).map(c => c.dataset.id);
+  // Fallback: full inventory order
+  return inventory.map(g => g.id);
+}
+
+function navigateDetail(dir) {
+  const ids = getFilteredIds();
+  const idx = ids.indexOf(currentDetailId);
+  if (idx === -1) return;
+  const next = idx + dir;
+  if (next < 0 || next >= ids.length) return;
+  showDetail(ids[next]);
+}
+
+function updateDetailNav(id) {
+  const ids = getFilteredIds();
+  const idx = ids.indexOf(id);
+  const prevBtn = document.getElementById('detailPrevBtn');
+  const nextBtn = document.getElementById('detailNextBtn');
+  const label   = document.getElementById('detailNavLabel');
+  if (!prevBtn) return;
+  prevBtn.disabled = idx <= 0;
+  nextBtn.disabled = idx >= ids.length - 1;
+  label.textContent = ids.length ? `${idx+1} / ${ids.length}` : '';
+}
+
 function showDetail(id) {
   const g = inventory.find(x => x.id === id);
   if (!g) return;
@@ -1357,9 +1404,11 @@ function showDetail(id) {
   const rmaHtml = buildRmaSections(g);
   content.innerHTML += rmaHtml;
 
+  currentDetailId = id;
   const detailTab = document.getElementById('detailTab');
   detailTab.style.display = 'block';
   switchScreen('detail-screen', detailTab);
+  updateDetailNav(id);
   if (!g.ai_description) fetchAIDescription(g);
 }
 
