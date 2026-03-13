@@ -450,6 +450,40 @@ select.filter-select {
 @keyframes pulse { 0%,100%{opacity:.3} 50%{opacity:1} }
 .detail-actions { display:flex; gap:10px; flex-wrap:wrap; }
 
+/* ── RANGE / MAINTENANCE / ACCESSORIES PANELS ── */
+.rma-grid {
+  display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px;
+  margin-top: 20px;
+}
+@media (max-width:900px) { .rma-grid { grid-template-columns: 1fr; } }
+.rma-panel {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: 4px; padding: 16px;
+}
+.rma-title {
+  font-family: var(--heading); font-size:16px; letter-spacing:2px;
+  color: var(--accent); margin-bottom:12px;
+  border-bottom: 1px solid var(--border); padding-bottom:6px;
+}
+.rma-row { display:flex; align-items:center; gap:8px; margin-bottom:8px; font-size:13px; }
+.rma-row input[type=checkbox] { accent-color: var(--accent); width:15px; height:15px; cursor:pointer; flex-shrink:0; }
+.rma-row label { cursor:pointer; color: var(--text-secondary); line-height:1.3; }
+.rma-input { background:var(--bg-panel); border:1px solid var(--border); color:var(--text-primary);
+  font-family:var(--mono); font-size:12px; padding:5px 8px; border-radius:3px; width:100%; box-sizing:border-box; }
+.rma-input:focus { outline:none; border-color:var(--accent); }
+.rma-counter { display:flex; align-items:center; gap:8px; margin-bottom:12px; }
+.rma-counter-btn { background:var(--bg-panel); border:1px solid var(--border); color:var(--accent);
+  font-family:var(--mono); font-size:16px; width:30px; height:30px; cursor:pointer;
+  border-radius:3px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+.rma-counter-btn:hover { border-color:var(--accent); background:var(--bg-card); }
+.rma-total { font-family:var(--mono); font-size:22px; color:var(--accent); font-weight:bold; min-width:60px; }
+.rma-log-entry { font-family:var(--mono); font-size:10px; color:var(--text-dim); 
+  border-bottom:1px solid var(--border); padding:4px 0; line-height:1.5; }
+.rma-save-btn { background:var(--accent); border:none; color:#000; font-family:var(--heading);
+  font-size:13px; letter-spacing:1px; padding:6px 14px; border-radius:3px; cursor:pointer; margin-top:8px; width:100%; }
+.rma-save-btn:hover { opacity:.85; }
+.maint-date { margin-bottom:10px; }
+
 /* ── CAMERA MODAL ── */
 .camera-container {
   position:relative; background:#000;
@@ -879,6 +913,86 @@ function getApiKey() {
   return key;
 }
 
+// ══════════════════════════════════════════
+//  RANGE / MAINTENANCE / ACCESSORIES
+// ══════════════════════════════════════════
+function rmaAdjustRounds(id, delta) {
+  const g = inventory.find(x => x.id === id);
+  if (!g) return;
+  if (!g.range_rounds) g.range_rounds = { total:0, sessions:[] };
+  g.range_rounds.total = Math.max(0, (g.range_rounds.total||0) + delta);
+  const el = document.getElementById('rmaTotal_' + id);
+  if (el) el.textContent = g.range_rounds.total.toLocaleString();
+  save();
+}
+
+function rmaLogSession(id) {
+  const g = inventory.find(x => x.id === id);
+  if (!g) return;
+  if (!g.range_rounds) g.range_rounds = { total:0, sessions:[] };
+  const inp = document.getElementById('rmaAdd_' + id);
+  const rounds = parseInt(inp.value) || 0;
+  if (rounds <= 0) { showToast('Enter rounds fired this session', 'error'); return; }
+  g.range_rounds.total = (g.range_rounds.total||0) + rounds;
+  const today = new Date().toISOString().slice(0,10);
+  if (!g.range_rounds.sessions) g.range_rounds.sessions = [];
+  g.range_rounds.sessions.push({ date: today, rounds });
+  inp.value = '';
+  // Update total display
+  const totEl = document.getElementById('rmaTotal_' + id);
+  if (totEl) totEl.textContent = g.range_rounds.total.toLocaleString();
+  // Refresh log display (last 3)
+  const logEl = document.getElementById('rmaLog_' + id);
+  if (logEl) {
+    const recent = g.range_rounds.sessions.slice(-3).reverse();
+    logEl.innerHTML = recent.map(s => `<div class="rma-log-entry">${s.date} — ${s.rounds.toLocaleString()} rounds</div>`).join('');
+  }
+  save();
+  showToast(`✓ Logged ${rounds.toLocaleString()} rounds`, 'success');
+}
+
+function rmaSaveMaint(id, logEntry=false) {
+  const g = inventory.find(x => x.id === id);
+  if (!g) return;
+  if (!g.maintenance) g.maintenance = { log:[], tasks:{}, last_service:'' };
+  const tasks = ['clean_barrel','clean_action','lubricate','inspect_feed','inspect_springs','check_headspace','clean_suppressor','replace_recoil'];
+  tasks.forEach(key => {
+    const el = document.getElementById(`maint_${key}_${id}`);
+    if (el) g.maintenance.tasks[key] = el.checked;
+  });
+  const dateEl = document.getElementById('maintDate_' + id);
+  if (dateEl) g.maintenance.last_service = dateEl.value;
+  if (logEntry) {
+    const noteEl = document.getElementById('maintNote_' + id);
+    const note = noteEl ? noteEl.value.trim() : '';
+    const today = new Date().toISOString().slice(0,10);
+    const checkedTasks = tasks.filter(k => g.maintenance.tasks[k])
+      .map(k => ({'clean_barrel':'Barrel cleaned','clean_action':'Action cleaned','lubricate':'Lubricated',
+        'inspect_feed':'Feed inspected','inspect_springs':'Springs checked','check_headspace':'Headspace checked',
+        'clean_suppressor':'Suppressor cleaned','replace_recoil':'Recoil spring replaced'})[k]);
+    const logNote = [checkedTasks.join(', '), note].filter(Boolean).join(' | ') || 'Maintenance logged';
+    if (!g.maintenance.log) g.maintenance.log = [];
+    g.maintenance.log.push({ date: today, note: logNote });
+    if (noteEl) noteEl.value = '';
+    showToast('✓ Maintenance saved & logged', 'success');
+  }
+  save();
+}
+
+function rmaSaveAccessories(id) {
+  const g = inventory.find(x => x.id === id);
+  if (!g) return;
+  if (!g.accessories) g.accessories = {};
+  const keys = ['optic_red_dot','optic_moa','optic_scope','light_weapon','suppressor_can','bipod','foregrip','sling','extended_mag','laser','stock_upgrade','trigger_upgrade'];
+  keys.forEach(key => {
+    const el = document.getElementById(`acc_${key}_${id}`);
+    if (el) g.accessories[key] = el.checked;
+  });
+  const customEl = document.getElementById('accCustom_' + id);
+  if (customEl) g.accessories.custom = customEl.value;
+  save();
+}
+
 function getTextModel() {
   return localStorage.getItem('armory_text_model') || 'llama-3.3-70b-versatile';
 }
@@ -963,7 +1077,7 @@ async function grokVision(prompt, base64Image, mimeType='image/jpeg') {
   throw new Error(lastError || 'No vision model available. Daily quota resets at midnight UTC.');
 }
 
-const TEMPLATE_COLS = ['make','model','type','caliber','serial_number','barrel_length','overall_length','weight','finish','capacity','action','year','condition','value','notes','image_url','logo_url'];
+const TEMPLATE_COLS = ['make','model','type','caliber','serial_number','barrel_length','overall_length','weight','finish','capacity','action','year','condition','value','notes','image_url','logo_url','range_rounds_total','range_rounds_sessions','maintenance_last_service','maintenance_tasks','maintenance_log','accessories'];
 
 // ── MANUFACTURER LOGO MAP ──
 const LOGO_MAP = {
@@ -1239,6 +1353,10 @@ function showDetail(id) {
       </div>
     </div>`;
 
+  // ── RANGE / MAINTENANCE / ACCESSORIES HTML ──
+  const rmaHtml = buildRmaSections(g);
+  content.innerHTML += rmaHtml;
+
   const detailTab = document.getElementById('detailTab');
   detailTab.style.display = 'block';
   switchScreen('detail-screen', detailTab);
@@ -1250,6 +1368,93 @@ function spec(label, value, mono=false) {
   return `<div class="spec-row">
     <div class="spec-label">${label}</div>
     <div class="spec-value" ${mono?'style="font-family:var(--mono);font-size:12px"':''}>${value}</div>
+  </div>`;
+}
+
+function buildRmaSections(g) {
+  const rr = g.range_rounds || { total:0, sessions:[] };
+  const maint = g.maintenance || { log:[], tasks:{} };
+  const acc = g.accessories || {};
+
+  const maintTasks = [
+    ['clean_barrel',    'Clean barrel & bore'],
+    ['clean_action',    'Clean action / receiver'],
+    ['lubricate',       'Lubricate moving parts'],
+    ['inspect_feed',    'Inspect feed / magazine'],
+    ['inspect_springs', 'Inspect springs & pins'],
+    ['check_headspace', 'Check headspace'],
+    ['clean_suppressor','Clean suppressor / can'],
+    ['replace_recoil',  'Replace recoil spring'],
+  ];
+
+  const accList = [
+    ['optic_red_dot',  'Red Dot Sight'],
+    ['optic_moa',      'MOA Red Dot'],
+    ['optic_scope',    'Magnified Scope'],
+    ['light_weapon',   'Weapon Light'],
+    ['suppressor_can', 'Suppressor / Can'],
+    ['bipod',          'Bipod'],
+    ['foregrip',       'Foregrip'],
+    ['sling',          'Sling'],
+    ['extended_mag',   'Extended Magazine'],
+    ['laser',          'Laser Sight'],
+    ['stock_upgrade',  'Upgraded Stock'],
+    ['trigger_upgrade','Upgraded Trigger'],
+  ];
+
+  // Last 3 maintenance log entries
+  const recentLog = (maint.log||[]).slice(-3).reverse().map(e =>
+    `<div class="rma-log-entry">${e.date} — ${e.note}</div>`).join('');
+
+  return `<div class="rma-grid" style="padding:0 0 20px 0">
+
+    <!-- RANGE ROUNDS -->
+    <div class="rma-panel">
+      <div class="rma-title">🎯 RANGE LOG</div>
+      <div style="margin-bottom:6px;font-family:var(--mono);font-size:10px;color:var(--text-dim);letter-spacing:1px">TOTAL ROUNDS FIRED</div>
+      <div class="rma-counter">
+        <button class="rma-counter-btn" onclick="rmaAdjustRounds('${g.id}',-10)">−</button>
+        <div class="rma-total" id="rmaTotal_${g.id}">${(rr.total||0).toLocaleString()}</div>
+        <button class="rma-counter-btn" onclick="rmaAdjustRounds('${g.id}',10)">+</button>
+      </div>
+      <div style="display:flex;gap:6px;margin-bottom:10px">
+        <input class="rma-input" type="number" id="rmaAdd_${g.id}" placeholder="Add rounds from session" min="0" style="flex:1">
+        <button class="rma-counter-btn" style="width:auto;padding:0 10px;font-size:12px;font-family:var(--heading);letter-spacing:1px" onclick="rmaLogSession('${g.id}')">LOG</button>
+      </div>
+      <div style="font-family:var(--mono);font-size:10px;color:var(--text-dim);letter-spacing:1px;margin-bottom:6px">RECENT SESSIONS</div>
+      <div id="rmaLog_${g.id}">${recentLog || '<div style="font-family:var(--mono);font-size:11px;color:var(--text-dim)">No sessions logged</div>'}</div>
+    </div>
+
+    <!-- MAINTENANCE -->
+    <div class="rma-panel">
+      <div class="rma-title">🔧 MAINTENANCE</div>
+      <div class="maint-date" style="display:flex;gap:8px;align-items:center">
+        <div style="font-family:var(--mono);font-size:10px;color:var(--text-dim);white-space:nowrap">LAST SERVICE</div>
+        <input class="rma-input" type="date" id="maintDate_${g.id}" value="${maint.last_service||''}" style="flex:1">
+      </div>
+      ${maintTasks.map(([key,label]) => `
+      <div class="rma-row">
+        <input type="checkbox" id="maint_${key}_${g.id}" ${(maint.tasks||{})[key] ? 'checked' : ''} onchange="rmaSaveMaint('${g.id}')">
+        <label for="maint_${key}_${g.id}">${label}</label>
+      </div>`).join('')}
+      <input class="rma-input" type="text" id="maintNote_${g.id}" placeholder="Add maintenance note..." style="margin-top:8px">
+      <button class="rma-save-btn" onclick="rmaSaveMaint('${g.id}', true)">SAVE & LOG</button>
+    </div>
+
+    <!-- ACCESSORIES -->
+    <div class="rma-panel">
+      <div class="rma-title">⚙ ACCESSORIES</div>
+      ${accList.map(([key,label]) => `
+      <div class="rma-row">
+        <input type="checkbox" id="acc_${key}_${g.id}" ${acc[key] ? 'checked' : ''} onchange="rmaSaveAccessories('${g.id}')">
+        <label for="acc_${key}_${g.id}">${label}</label>
+      </div>`).join('')}
+      <div style="margin-top:10px">
+        <div style="font-family:var(--mono);font-size:10px;color:var(--text-dim);letter-spacing:1px;margin-bottom:4px">CUSTOM / OTHER</div>
+        <input class="rma-input" type="text" id="accCustom_${g.id}" value="${acc.custom||''}" placeholder="e.g. aftermarket barrel, compensator..." onchange="rmaSaveAccessories('${g.id}')">
+      </div>
+    </div>
+
   </div>`;
 }
 
@@ -1928,6 +2133,21 @@ function processImportFile(file) {
           notes:         String(row.notes||row.Notes||'') || undefined,
           image_url:     String(row.image_url||row.image||'') || undefined,
           logo_url:      String(row.logo_url||row.logo||'') || undefined,
+          range_rounds:  (() => {
+            const total = parseInt(row.range_rounds_total)||0;
+            let sessions = [];
+            try { sessions = JSON.parse(row.range_rounds_sessions||'[]'); } catch(e){}
+            return { total, sessions };
+          })(),
+          maintenance:   (() => {
+            let tasks={}, log=[];
+            try { tasks = JSON.parse(row.maintenance_tasks||'{}'); } catch(e){}
+            try { log   = JSON.parse(row.maintenance_log||'[]');   } catch(e){}
+            return { last_service: String(row.maintenance_last_service||''), tasks, log };
+          })(),
+          accessories:   (() => {
+            try { return JSON.parse(row.accessories||'{}'); } catch(e){ return {}; }
+          })(),
         };
         // Strip undefined keys
         Object.keys(incoming).forEach(k => incoming[k] === undefined && delete incoming[k]);
@@ -1942,6 +2162,19 @@ function processImportFile(file) {
               existing[k] = incoming[k];
             }
           });
+          // Merge RMA fields — keep existing data, add new
+          if (incoming.range_rounds && incoming.range_rounds.total > (existing.range_rounds||{}).total) {
+            existing.range_rounds = incoming.range_rounds;
+          }
+          if (incoming.maintenance) {
+            if (!existing.maintenance) existing.maintenance = { log:[], tasks:{}, last_service:'' };
+            if (incoming.maintenance.last_service) existing.maintenance.last_service = incoming.maintenance.last_service;
+            Object.assign(existing.maintenance.tasks||{}, incoming.maintenance.tasks||{});
+            // Merge log entries by date (no duplicates)
+            const existDates = new Set((existing.maintenance.log||[]).map(e=>e.date+e.note));
+            (incoming.maintenance.log||[]).forEach(e => { if (!existDates.has(e.date+e.note)) existing.maintenance.log.push(e); });
+          }
+          if (incoming.accessories) Object.assign(existing.accessories||{}, incoming.accessories);
           updated++;
         } else {
           inventory.push({
@@ -2021,7 +2254,13 @@ function exportInventory() {
     overall_length:g.overall_length, weight:g.weight, finish:g.finish,
     capacity:g.capacity, action:g.action, year:g.year,
     condition:g.condition, value:g.value, notes:g.notes,
-    image_url:cap(g.image_url), logo_url:cap(g.logo_url)
+    image_url:cap(g.image_url), logo_url:cap(g.logo_url),
+    range_rounds_total: (g.range_rounds||{}).total||0,
+    range_rounds_sessions: JSON.stringify((g.range_rounds||{}).sessions||[]),
+    maintenance_last_service: (g.maintenance||{}).last_service||'',
+    maintenance_tasks: JSON.stringify((g.maintenance||{}).tasks||{}),
+    maintenance_log: JSON.stringify((g.maintenance||{}).log||[]),
+    accessories: JSON.stringify(g.accessories||{})
   }));
   try {
     const ws = XLSX.utils.json_to_sheet(data);
